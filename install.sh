@@ -11,9 +11,8 @@
 set -euo pipefail
 
 APP_DIR="${1:-/opt/yuxiaxie}"
-PKG_URL="${PKG_URL:-https://raw.githubusercontent.com/xingcheng1423-cmyk/yuxiaxie-docker/main/yuxiaxie-docker.tar.gz}"
-PKG_PARTS="${PKG_PARTS:-https://cdn.jsdelivr.net/gh/xingcheng1423-cmyk/yuxiaxie-docker@main/pkg.b64}"
-PKG_PARTS2="${PKG_PARTS2:-https://raw.githubusercontent.com/xingcheng1423-cmyk/yuxiaxie-docker/main/pkg.b64}"
+PKG_URLS="${PKG_URLS:-https://raw.githubusercontent.com/xingcheng1423-cmyk/yuxiaxie-docker/main/yuxiaxie-docker.tar.gz,https://cdn.jsdelivr.net/gh/xingcheng1423-cmyk/yuxiaxie-docker@main/yuxiaxie-docker.tar.gz}"
+PKG_URL="${PKG_URL:-}"
 PKG_NAME="yuxiaxie-docker.tar.gz"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo .)"
 
@@ -152,31 +151,21 @@ else
   TMP="$(mktemp -d)"
   PKG_FILE="$TMP/$PKG_NAME"
 
-  try_direct() {
-    [ -n "$PKG_URL" ] || return 1
-    log "下载安装包：$PKG_URL"
-    curl -fL --max-time 600 "$PKG_URL" -o "$PKG_FILE" || return 1
-    tar -tzf "$PKG_FILE" >/dev/null 2>&1
-  }
-
-  try_parts() {
-    [ -n "$PKG_PARTS" ] || return 1
-    log "下载安装包（分片）：$PKG_PARTS.part0 ..."
-    : > "$TMP/pkg.b64"
-    for i in 0 1 2 3 4 5 6 7; do
-      if curl -fL --max-time 600 "$PKG_PARTS.part$i" -o "$TMP/part$i" 2>/dev/null \
-         || curl -fL --max-time 600 "$PKG_PARTS2.part$i" -o "$TMP/part$i" 2>/dev/null; then
-        cat "$TMP/part$i" >> "$TMP/pkg.b64"
-      else
-        break
+  try_urls() {
+    # PKG_URL 优先（用户显式指定），随后依次尝试 PKG_URLS 里的镜像源
+    for u in $PKG_URL $(echo "$PKG_URLS" | tr ',' ' '); do
+      [ -n "$u" ] || continue
+      log "下载安装包：$u"
+      if curl -fL --max-time 600 "$u" -o "$PKG_FILE" 2>/dev/null \
+         && tar -tzf "$PKG_FILE" >/dev/null 2>&1; then
+        return 0
       fi
+      warn "该源不可用，换下一个..."
     done
-    [ -s "$TMP/pkg.b64" ] || return 1
-    base64 -d "$TMP/pkg.b64" > "$PKG_FILE" 2>/dev/null || return 1
-    tar -tzf "$PKG_FILE" >/dev/null 2>&1
+    return 1
   }
 
-  if ! try_direct && ! try_parts; then
+  if ! try_urls; then
     die "安装包下载失败，请检查网络，或手动下载 $PKG_NAME 放到本脚本同目录后重试"
   fi
   log "校验并解压安装包..."
