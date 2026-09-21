@@ -38,11 +38,78 @@ else
 fi
 
 # ---------- 2. 检查 / 安装 Docker ----------
-if ! command -v docker >/dev/null 2>&1; then
+ensure_curl() {
+  command -v curl >/dev/null 2>&1 && return 0
+  warn "未检测到 curl，正在安装..."
+  if command -v apt-get >/dev/null 2>&1; then
+    $SUDO apt-get update -qq >/dev/null 2>&1 || true
+    $SUDO apt-get install -y -qq curl ca-certificates >/dev/null 2>&1 || true
+    if ! command -v curl >/dev/null 2>&1; then
+      # Debian 已 EOL：官方源 404，切 archive 源重试
+      . /etc/os-release 2>/dev/null || true
+      C="${VERSION_CODENAME:-}"
+      if [ -n "$C" ]; then
+        warn "官方源不可用（EOL 系统），切换 archive.debian.org..."
+        $SUDO cp /etc/apt/sources.list /etc/apt/sources.list.bak 2>/dev/null || true
+        printf 'deb http://archive.debian.org/debian %s main contrib non-free\ndeb http://archive.debian.org/debian-security %s/updates main contrib non-free\n' "$C" "$C" | $SUDO tee /etc/apt/sources.list >/dev/null
+        echo 'Acquire::Check-Valid-Until "false";' | $SUDO tee /etc/apt/apt.conf.d/99archive >/dev/null
+        $SUDO apt-get update -qq >/dev/null 2>&1 || true
+        $SUDO apt-get install -y -qq curl ca-certificates >/dev/null 2>&1 || true
+      fi
+    fi
+  elif command -v yum >/dev/null 2>&1; then
+    $SUDO yum install -y -q curl >/dev/null 2>&1 || true
+  elif command -v apk >/dev/null 2>&1; then
+    $SUDO apk add --no-cache curl >/dev/null 2>&1 || true
+  fi
+  command -v curl >/dev/null 2>&1 || die "curl 安装失败，请手动安装 curl 后重试"
+}
+
+install_docker() {
   warn "未检测到 Docker，正在自动安装（约 1-3 分钟）..."
-  curl -fsSL https://get.docker.com | $SUDO sh || die "Docker 安装失败，请手动安装后重试"
-  $SUDO systemctl enable --now docker >/dev/null 2>&1 || true
-fi
+
+  # 1) 优先官方一键脚本
+  if curl -fsSL https://get.docker.com -o /tmp/get-docker.sh 2>/dev/null \
+     && $SUDO sh /tmp/get-docker.sh >/tmp/docker-install.log 2>&1 \
+     && command -v docker >/dev/null 2>&1; then
+    log "Docker 安装完成（官方脚本）"
+    return 0
+  fi
+
+  # 2) 官方脚本失败（Debian 10 等 EOL 系统会因个别包不存在而整体失败）→ 按源装核心包
+  warn "官方脚本未成功（EOL 系统常见），改用官方源直接安装核心包..."
+  . /etc/os-release 2>/dev/null || true
+  DIST="${ID:-debian}"
+  CODE="${VERSION_CODENAME:-}"
+  [ "$DIST" = "ubuntu" ] || [ "$DIST" = "debian" ] || DIST="debian"
+
+  if command -v apt-get >/dev/null 2>&1; then
+    $SUDO install -m 0755 -d /etc/apt/keyrings
+    if curl -fsSL "https://download.docker.com/linux/$DIST/gpg" \
+        | $SUDO tee /etc/apt/keyrings/docker.asc >/dev/null 2>&1; then
+      $SUDO chmod a+r /etc/apt/keyrings/docker.asc
+      echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/$DIST $CODE stable" \
+        | $SUDO tee /etc/apt/sources.list.d/docker.list >/dev/null
+      $SUDO apt-get update -qq >/dev/null 2>&1 || true
+      $SUDO apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin >/dev/null 2>&1 || true
+    fi
+  elif command -v yum >/dev/null 2>&1; then
+    $SUDO yum install -y -q yum-utils >/dev/null 2>&1 || true
+    $SUDO yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo >/dev/null 2>&1 || true
+    $SUDO yum install -y -q docker-ce docker-ce-cli containerd.io docker-compose-plugin >/dev/null 2>&1 || true
+  fi
+
+  command -v docker >/dev/null 2>&1 || die "Docker 安装失败，请手动安装后重试"
+  return 0
+}
+
+ensure_curl
+command -v docker >/dev/null 2>&1 || install_docker
+
+# 启动并设置开机自启
+$SUDO systemctl enable --now docker >/dev/null 2>&1 \
+  || $SUDO service docker start >/dev/null 2>&1 \
+  || true
 
 if $SUDO docker compose version >/dev/null 2>&1; then
   DC="$SUDO docker compose"
@@ -51,12 +118,26 @@ elif command -v docker-compose >/dev/null 2>&1; then
 else
   warn "缺少 compose 插件，正在安装..."
   $SUDO apt-get update -qq >/dev/null 2>&1 || true
-  $SUDO apt-get install -y -qq docker-compose-plugin >/dev/null 2>&1 \
-    || $SUDO yum install -y docker-compose-plugin >/dev/null 2>&1 \
-    || die "docker compose 安装失败"
-  DC="$SUDO docker compose"
+  $SUDO apt-get install -y -qq docker-compose-plugin >/dev/null 2>&1 || true
+  $SUDO yum install -y docker-compose-plugin >/dev/null 2>&1 || true
+  if ! $SUDO docker compose version >/dev/null 2>&1; then
+    # 兜底：下载 compose v2 静态二进制作为 CLI 插件
+    case "$(uname -m)" in aarch64|arm64) ARCH=aarch64 ;; *) ARCH=x86_64 ;; esac
+    $SUDO mkdir -p /usr/libexec/docker/cli-plugins
+    if curl -fsSL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-$ARCH" -o /tmp/docker-compose 2>/dev/null; then
+      $SUDO install -m 0755 /tmp/docker-compose /usr/libexec/docker/cli-plugins/docker-compose
+      $SUDO ln -sf /usr/libexec/docker/cli-plugins/docker-compose /usr/local/bin/docker-compose 2>/dev/null || true
+    fi
+  fi
+  if $SUDO docker compose version >/dev/null 2>&1; then
+    DC="$SUDO docker compose"
+  elif command -v docker-compose >/dev/null 2>&1; then
+    DC="$SUDO docker-compose"
+  else
+    die "docker compose 安装失败，请手动安装 docker-compose-plugin 后重试"
+  fi
 fi
-log "Docker 就绪：$(docker --version)"
+log "Docker 就绪：$(docker --version 2>/dev/null | head -1)"
 
 # ---------- 3. 准备安装目录 ----------
 $SUDO mkdir -p "$APP_DIR"
