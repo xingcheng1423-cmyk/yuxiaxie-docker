@@ -1,3 +1,3 @@
 9bb202b0a6d0f5904efa6e7be435dce490c3533ff77c7a085b57ccc15e8fcc5c *install.sh
 8ddffa12e08b5f5318e3c0228795a4a8d5341b5491ec25f5d47740a71ed3fe01 *uninstall.sh
-72aaa7eb4d9cc940cc0c68b30484c2886bcc142a5f9eefa03f489a010b4ec957 *yuxiaxie-docker.tar.gz
+dbff670d5022df3857156b995729f31bd4e83f1d1bfbea2f1ce3eabea2105599 *yuxiaxie-docker.tar.gz
