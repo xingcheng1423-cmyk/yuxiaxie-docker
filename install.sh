@@ -45,6 +45,13 @@ if [ "${1:-}" = "uninstall" ] || [ "${1:-}" = "--uninstall" ]; then
   die "卸载脚本下载失败，可手动执行：docker compose -f /opt/yuxiaxie/docker-compose.yml down -v && rm -rf /opt/yuxiaxie"
 fi
 
+# ---------- 更新分支：bash install.sh update ----------
+UPDATE_MODE=0
+if [ "${1:-}" = "update" ] || [ "${1:-}" = "--update" ]; then
+  UPDATE_MODE=1
+  shift || true
+fi
+
 # ---------- 1. 检查 root ----------
 if [ "$(id -u)" -ne 0 ]; then
   SUDO="sudo"
@@ -166,10 +173,10 @@ log "Docker 就绪：$(docker --version 2>/dev/null | head -1)"
 # ---------- 3. 准备安装目录 ----------
 $SUDO mkdir -p "$APP_DIR"
 
-if [ -f "$SCRIPT_DIR/yuxiaxie-server/app.js" ]; then
+if [ "$UPDATE_MODE" != "1" ] && [ -f "$SCRIPT_DIR/yuxiaxie-server/app.js" ]; then
   log "检测到本地源码，直接使用"
   $SUDO cp -a "$SCRIPT_DIR/yuxiaxie-server/." "$APP_DIR/"
-elif [ -f "$SCRIPT_DIR/$PKG_NAME" ]; then
+elif [ "$UPDATE_MODE" != "1" ] && [ -f "$SCRIPT_DIR/$PKG_NAME" ]; then
   log "发现本地安装包 $SCRIPT_DIR/$PKG_NAME，解压中..."
   $SUDO tar -xzf "$SCRIPT_DIR/$PKG_NAME" -C "$APP_DIR" --strip-components=1
 else
@@ -204,6 +211,9 @@ cd "$APP_DIR"
 log "代码就位：$APP_DIR"
 
 # ---------- 4. 生成 .env ----------
+if [ "$UPDATE_MODE" = "1" ]; then
+  log "更新模式：拉取最新安装包覆盖代码（.env 与数据库数据保留）"
+fi
 if [ ! -f .env ]; then
   log "生成 .env（随机密钥）"
   PUB_IP="$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null \
@@ -235,7 +245,7 @@ log "等待服务就绪..."
 for i in $(seq 1 60); do
   if curl -fsS --max-time 2 "http://127.0.0.1:${HTTP_PORT:-3000}/health" >/dev/null 2>&1; then
     echo
-    log "部署完成！"
+    if [ "$UPDATE_MODE" = "1" ]; then log "更新完成！（数据库数据未动）"; else log "部署完成！"; fi
     echo "----------------------------------------------------"
     echo "  游戏页面   : http://${PUBLIC_HOST}:${HTTP_PORT:-3000}/"
     echo "  后台管理   : http://${PUBLIC_HOST}:${HTTP_PORT:-3000}/admin/login"
