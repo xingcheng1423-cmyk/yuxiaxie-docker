@@ -38,6 +38,29 @@ curl -fsSL https://cdn.jsdelivr.net/gh/xingcheng1423-cmyk/yuxiaxie-docker@main/i
 后台密码在服务器 `/opt/yuxiaxie/.env` 的 `ADMIN_PASS`。
 **记得在云服务器安全组放行 TCP 3000 和 18282。**
 
+## 一键卸载
+
+```bash
+# 交互确认后彻底删除（容器 + 数据库数据 + 镜像 + 安装目录）
+curl -fsSL https://raw.githubusercontent.com/xingcheng1423-cmyk/yuxiaxie-docker/main/uninstall.sh | bash
+
+# 不询问，直接删
+curl -fsSL https://raw.githubusercontent.com/xingcheng1423-cmyk/yuxiaxie-docker/main/uninstall.sh | bash -s -- --yes
+
+# 只停服务、保留数据库数据（以后再部署数据还在）
+curl -fsSL https://raw.githubusercontent.com/xingcheng1423-cmyk/yuxiaxie-docker/main/uninstall.sh | bash -s -- --keep-data
+```
+
+也可以走安装脚本的子命令：`... install.sh | bash -s uninstall --yes`
+
+**手动卸载**（不想跑脚本就三行）：
+
+```bash
+cd /opt/yuxiaxie && docker compose down -v --remove-orphans   # 删容器+数据库数据（去掉 -v 则保留数据）
+docker rmi -f yuxiaxie-server:latest                          # 删应用镜像
+rm -rf /opt/yuxiaxie                                          # 删安装目录
+```
+
 ## 仓库内容
 
 | 文件 | 说明 |

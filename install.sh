@@ -28,6 +28,23 @@ rand() {
   fi
 }
 
+# ---------- 卸载分支：bash install.sh uninstall [--yes|--keep-data|--purge-docker] ----------
+if [ "${1:-}" = "uninstall" ] || [ "${1:-}" = "--uninstall" ]; then
+  shift || true
+  if [ -f "$SCRIPT_DIR/uninstall.sh" ]; then
+    bash "$SCRIPT_DIR/uninstall.sh" "$@"
+    exit $?
+  fi
+  TMPU="$(mktemp)"
+  if curl -fsSL "https://raw.githubusercontent.com/xingcheng1423-cmyk/yuxiaxie-docker/main/uninstall.sh" -o "$TMPU" 2>/dev/null; then
+    bash "$TMPU" "$@"
+    S=$?
+    rm -f "$TMPU"
+    exit $S
+  fi
+  die "卸载脚本下载失败，可手动执行：docker compose -f /opt/yuxiaxie/docker-compose.yml down -v && rm -rf /opt/yuxiaxie"
+fi
+
 # ---------- 1. 检查 root ----------
 if [ "$(id -u)" -ne 0 ]; then
   SUDO="sudo"
