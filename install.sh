@@ -50,6 +50,9 @@ UPDATE_MODE=0
 if [ "${1:-}" = "update" ] || [ "${1:-}" = "--update" ]; then
   UPDATE_MODE=1
   shift || true
+  # shift 之后第一个位置参数才是安装目录，必须重新取一次
+  # （否则 APP_DIR 会被上面那行赋成 "update"，装到 ./update 里去）
+  APP_DIR="${1:-/opt/yuxiaxie}"
 fi
 
 # ---------- 1. 检查 root ----------
