@@ -67,12 +67,20 @@ ensure_curl() {
 install_docker() {
   warn "未检测到 Docker，正在自动安装（约 1-3 分钟）..."
 
-  # 1) 优先官方一键脚本
-  if curl -fsSL https://get.docker.com -o /tmp/get-docker.sh 2>/dev/null \
-     && $SUDO sh /tmp/get-docker.sh >/tmp/docker-install.log 2>&1 \
-     && command -v docker >/dev/null 2>&1; then
-    log "Docker 安装完成（官方脚本）"
-    return 0
+  # 1) 优先官方一键脚本（后台跑 + 每 4 秒回显一条实时进度，避免看着像卡死）
+  if curl -fsSL https://get.docker.com -o /tmp/get-docker.sh 2>/dev/null; then
+    log "开始安装 Docker（约 1-3 分钟，下面会持续显示进度）..."
+    $SUDO sh /tmp/get-docker.sh > /tmp/docker-install.log 2>&1 &
+    DOCKER_PID=$!
+    while kill -0 "$DOCKER_PID" 2>/dev/null; do
+      sleep 4
+      PROGRESS_LINE=$(tail -n 60 /tmp/docker-install.log 2>/dev/null | grep -v '^+' | grep -v '^$' | tail -n 1 | cut -c1-88)
+      [ -n "$PROGRESS_LINE" ] && printf '    \033[36m… %s\033[0m\n' "$PROGRESS_LINE"
+    done
+    if wait "$DOCKER_PID" 2>/dev/null && command -v docker >/dev/null 2>&1; then
+      log "Docker 安装完成（官方脚本）"
+      return 0
+    fi
   fi
 
   # 2) 官方脚本失败（Debian 10 等 EOL 系统会因个别包不存在而整体失败）→ 按源装核心包
@@ -156,7 +164,8 @@ else
     for u in $PKG_URL $(echo "$PKG_URLS" | tr ',' ' '); do
       [ -n "$u" ] || continue
       log "下载安装包：$u"
-      if curl -fL --max-time 600 "$u" -o "$PKG_FILE" 2>/dev/null \
+      # 不吞掉 curl 的输出，这样能看到下载进度条
+      if curl -fL --max-time 600 "$u" -o "$PKG_FILE" \
          && tar -tzf "$PKG_FILE" >/dev/null 2>&1; then
         return 0
       fi
